@@ -1,0 +1,51 @@
+
+- name: Install PAM module for sudo auth via forwarded ssh-agent
+  hosts: all
+  become: true
+  tasks:
+    - name: Run whoami without become.
+      command: whoami
+      changed_when: false
+      become: false
+      register: whoami
+
+    - name: Set a fact with the user name.
+      set_fact:
+        remote_username: "{{ whoami.stdout }}"
+
+    - debug: var=remote_username
+
+    - name: install libpam-ssh-agent-auth
+      apt: name=libpam-ssh-agent-auth update_cache=true
+
+    - name: copy sudoers extension file
+      copy: >
+        src=files/pam-ssh-agent-auth.sudo.txt \
+        dest=/etc/sudoers.d/pam-ssh-agent-auth
+
+    - name: Add ssh-agent-auth in PAM sudo
+      lineinfile:
+        path: /etc/pam.d/sudo
+        insertafter: '#%PAM-1.0'
+        line: auth sufficient pam_ssh_agent_auth.so file=/etc/security/%u.authorized_keys
+
+    - name: Copy authorized_keys of current user to sudo-enabled keys
+      copy:
+        remote_src: true
+        src: /home/{{ remote_username }}/.ssh/authorized_keys
+        dest: /etc/security/{{ remote_username }}.authorized_keys
+        owner: root
+        mode: 0640
+
+    - name: Ensure that sudo group is enabled in /etc/sudoers
+      lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%sudo\s+ALL=\(ALL:ALL\)\s+ALL$'
+        line: '%sudo  ALL=(ALL:ALL) ALL'
+
+    - name: Ensure that no-password option is turned off in /etc/sudoers
+      lineinfile:
+        path: /etc/sudoers
+        state: absent
+        regexp: '^%sudo.*NOPASSWD:ALL'
