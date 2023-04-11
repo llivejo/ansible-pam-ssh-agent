@@ -15,6 +15,10 @@
 
     - debug: var=remote_username
 
+    - name: Check if remote user is not root
+      fail: msg="Please create non-root user on remote system and use it to login"
+      when: remote_username == "root"
+
     - name: install libpam-ssh-agent-auth
       apt: name=libpam-ssh-agent-auth update_cache=true
 

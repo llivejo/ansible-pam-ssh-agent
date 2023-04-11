@@ -1,0 +1,84 @@
+# usage for this playbook:
+#
+# ansible-playbook -i myservers -vv -e "new_user_name=myusername" create-selfuser-and-grant-sudo.yml
+
+
+- name: Create non-root user and grant ssh+sudo rights. Use when you have only remote root login
+  hosts: all
+  become: false
+  tasks:
+    - name: Fail if "new_user_name" is undefined. you should specify it in command-line
+      ansible.builtin.fail: msg="Bailing out. This play requires 'new_user_name', please specify -e 'new_user_name=someuser' in command-line"
+      when: new_user_name is undefined
+
+    - debug: var=new_user_name
+
+    - name: Run whoami
+      command: whoami
+      changed_when: false
+      register: whoami
+
+    - name: Set a fact with the user name.
+      set_fact:
+        remote_username: "{{ whoami.stdout }}"
+
+    - debug: var=remote_username
+
+    - name: Check if remote user is root
+      fail: msg="Remote user is non-root already, all is ready pam-ssh-agent installation"
+      when: remote_username != "root"
+
+    - name: install sudo
+      apt: name=sudo update_cache=true
+
+    - name: Add the user's group
+      ansible.builtin.group:
+        name: "{{ new_user_name }}"
+
+    - name: Add the user with a bash shell
+      ansible.builtin.user:
+        name: "{{ new_user_name }}"
+        shell: /bin/bash
+        groups: "{{ new_user_name }}"
+        home: "/home/{{ new_user_name }}"
+        update_password: on_create
+        password: "$6$SOqVcxk7NB8HIIb7$125raG1RQSKVxhXVNs8Ae6zqNRbqXjz8aC57izPg9vJ3sziWBRL9/t6Bwn2nzXLHQ2OGx2nLFYeT31b1ojc0M1"
+      when: new_user_name is defined
+      register: user_created
+
+    - name: Force user to change password
+      shell: chage -d 0 {{ new_user_name }}
+      when: user_created.changed
+
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: "/home/{{ new_user_name }}"
+        state: directory
+        owner: "{{ new_user_name }}"
+        mode: '0750'
+
+    - name: Append the group 'sudo' to the user's groups
+      ansible.builtin.user:
+        name: "{{ new_user_name }}"
+        groups: "sudo"
+        append: yes
+
+    - name: Create a directory if it does not exist
+      ansible.builtin.file:
+        path: "/home/{{ new_user_name }}/.ssh"
+        state: directory
+        owner: "{{ new_user_name }}"
+        mode: '0750'
+
+    - name: copy root's authorized_keys to {{ new_user_name }} authorized_keys
+      ansible.builtin.copy:
+        src: /root/.ssh/authorized_keys
+        remote_src: yes
+        dest: "/home/{{ new_user_name }}/.ssh/authorized_keys"
+        owner: "{{ new_user_name }}"
+        mode: '0640'
+      when: user_created.changed
+
+    - name: Finish
+      debug:
+        msg: "Now try to login as user {{ new_user_name }}, password is '123', change on first login"
